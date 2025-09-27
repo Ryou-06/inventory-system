@@ -178,7 +178,7 @@
 </div>
 
 <div class="overflow-x-auto">
-	<table class="w-full border-collapse border border-gray-300">
+	<table class="w-full border-collapse border border-gray-300 min-w-max">
 		<thead class="bg-gray-100">
 			<tr>
 				<th class="border border-gray-300 px-4 py-2">Name</th>
@@ -192,32 +192,33 @@
 			{#each filteredItems as item (item.id)}
 				<tr class="hover:bg-gray-50">
 					<td class="border border-gray-300 px-4 py-2">{item.name}</td>
-					<td class="border border-gray-300 px-4 py-2">{item.description}</td>
+					<td class="border border-gray-300 px-4 py-2 max-w-xs break-words">{item.description}</td>
 					<td class="border border-gray-300 px-4 py-2">{item.quantity}</td>
-					<td class="border border-gray-300 px-4 py-2">
-						{#if isLowStock(item.quantity)}
-							<span class="px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm">
-								Low Stock
-							</span>
-						{:else}
-							<span class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-sm">
-								In Stock
-							</span>
-						{/if}
-					</td>
+                    <td class="border border-gray-300 px-4 py-2 text-center align-middle">
+            {#if isLowStock(item.quantity)}
+		        <span class="inline-block px-4 py-1 bg-red-100 text-red-800 rounded-full text-sm whitespace-nowrap">
+			        Low Stock
+		        </span>
+	        {:else}
+		        <span class="inline-block px-4 py-1 bg-green-100 text-green-800 rounded-full text-sm whitespace-nowrap">
+			        In Stock
+		        </span>
+	        {/if}
+</td>
+
 					<td class="border border-gray-300 px-4 py-2 text-center">
-						<button
-							class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-							on:click={() => startEdit(item)}
-						>
-							✏️ Edit
-						</button>
-						<button
-							class="ml-2 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-							on:click={() => deleteItem(item.id)}
-						>
-							🗑 Delete
-						</button>
+                <button
+                    class="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    on:click={() => startEdit(item)}
+                    >
+                        ✏️ Edit
+                    </button>
+                        <button
+                            class="ml-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                            on:click={() => deleteItem(item.id)}
+                                >
+                            🗑 Delete
+                        </button>
 					</td>
 				</tr>
 			{/each}

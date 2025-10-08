@@ -1,6 +1,7 @@
-import { initializeApp, getApps } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth"; // 👈 Add this line for Authentication
+// src/lib/firebase.ts
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBQJBC_dx6mSDIca7EPzQwSmpQvjj9X83w",
@@ -11,9 +12,22 @@ const firebaseConfig = {
   appId: "1:1038771710911:web:f15efa917a70243dc64f0a",
 };
 
-// Initialize app
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
-// Export Firestore and Auth
+// Initialize Firestore
 export const db = getFirestore(app);
+
+// Initialize Auth with persistence
 export const auth = getAuth(app);
+
+// Set auth persistence to LOCAL (persists across browser tabs and sessions)
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log('✅ Auth persistence set to LOCAL');
+  })
+  .catch((error) => {
+    console.error('❌ Error setting auth persistence:', error);
+  });
+
+

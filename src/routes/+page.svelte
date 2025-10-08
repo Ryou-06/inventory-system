@@ -1,7 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/firebase';
-  import { signInWithEmailAndPassword } from 'firebase/auth';
+  import { signInWithEmailAndPassword, setPersistence, browserLocalPersistence } from 'firebase/auth';
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
 
   let email = '';
   let password = '';
@@ -9,6 +10,7 @@
   let success = '';
   let isLoading = false;
   let showPassword = false;
+  let rememberMe = true; // Default to remember user
   let showSnackbar = false;
   let snackbarMessage = '';
   let snackbarType: 'success' | 'error' = 'success';
@@ -22,18 +24,42 @@
     }, 3000);
   }
 
+  onMount(() => {
+    // Check if user is already logged in
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        console.log('User already logged in, redirecting...');
+        goto('/landing');
+      }
+    });
+
+    return () => unsubscribe();
+  });
+
   async function loginUser() {
     error = '';
     success = '';
     isLoading = true;
 
     try {
+      // Set persistence based on "Remember Me" checkbox
+      if (rememberMe) {
+        await setPersistence(auth, browserLocalPersistence);
+        console.log('✅ Session will persist across tabs and browser restarts');
+      }
+
       await signInWithEmailAndPassword(auth, email, password);
+      
+      // Store last login time
+      localStorage.setItem('lastLoginTime', new Date().toISOString());
+      
       success = 'Login successful! Redirecting...';
-      setTimeout(() => goto('/landing'), 1000);
+      triggerSnackbar('Login successful! Welcome back!', 'success');
+      setTimeout(() => goto('/landing'), 1500);
     } catch (err: any) {
       console.error('Login error:', err);
       error = err.message || 'Login failed. Please check your credentials.';
+      triggerSnackbar('Login failed. Please check your credentials.', 'error');
     } finally {
       isLoading = false;
     }
@@ -132,12 +158,18 @@
           </div>
         </div>
 
-        <!-- Forgot Password Link -->
-        <!-- <div class="flex items-center justify-end">
-          <a href="#" class="text-sm text-blue-600 hover:text-blue-700 font-semibold hover:underline transition-colors">
-            Forgot password?
-          </a>
-        </div> -->
+        <!-- Remember Me Checkbox -->
+        <div class="flex items-center">
+          <input
+            id="remember-me"
+            type="checkbox"
+            bind:checked={rememberMe}
+            class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+          />
+          <label for="remember-me" class="ml-2 text-sm text-gray-700 cursor-pointer">
+            Keep me logged in
+          </label>
+        </div>
 
         <!-- Login Button -->
         <button
@@ -176,3 +208,20 @@
     </p>
   </div>
 </div>
+
+<!-- Snackbar Notification -->
+{#if showSnackbar}
+  <div
+    class="fixed bottom-6 right-6 {snackbarType === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-red-600'} text-white px-6 py-4 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-4 duration-300 flex items-center gap-3 max-w-md">
+    {#if snackbarType === 'success'}
+      <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    {:else}
+      <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    {/if}
+    <span class="font-medium">{snackbarMessage}</span>
+  </div>
+{/if}

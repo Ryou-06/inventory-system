@@ -22,23 +22,47 @@
 		name: string;
 		description: string;
 		quantity: number;
+		imageUrl?: string;
 	}
 
 	let items: Item[] = [];
 	let filteredItems: Item[] = [];
 	let showModal = false;
+	let showImageModal = false;
 	let isEditing = false;
 	let editingId: string | null = null;
+	let selectedItemForImage: Item | null = null;
 	let searchQuery = '';
 	let lowStockThreshold = 20;
 	let userEmail: string | null = null;
 	let loading = true;
+	let uploadingImage = false;
+	let fileInput: HTMLInputElement | null = null; // bind this to the input
+	let previewUrl: string | null = null;
 
-	let newItem = {
-		name: '',
-		description: '',
-		quantity: ''
-	};
+
+
+
+
+
+	// Default image URL (placeholder)
+	const defaultImageUrl = 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=400&h=400&fit=crop';
+
+	// ImgBB API Key (from environment variable)
+	const IMGBB_API_KEY = import.meta.env.VITE_IMGBB_API_KEY;
+
+let newItem: {
+	name: string;
+	description: string;
+	quantity: string;
+	imageFile: File | null;
+} = {
+	name: '',
+	description: '',
+	quantity: '',
+	imageFile: null
+};
+
 
 	let showSnackbar = false;
 	let snackbarMessage = '';
@@ -65,7 +89,25 @@
 		});
 	});
 
-	// ✅ Logout function
+	// ✅ Compress image before upload
+async function compressImage(file: File): Promise<File> {
+	const bitmap = await createImageBitmap(file);
+	const canvas = document.createElement('canvas');
+	const ctx = canvas.getContext('2d')!;
+	canvas.width = 800; // resize width
+	canvas.height = (bitmap.height / bitmap.width) * 800;
+	ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+	return new Promise((resolve) => {
+		canvas.toBlob(
+			(blob) => resolve(new File([blob!], file.name, { type: file.type })),
+			file.type,
+			0.7 // compression quality (0.7 = 70%)
+		);
+	});
+}
+
+
 	async function logoutUser() {
 		try {
 			await signOut(auth);
@@ -95,7 +137,8 @@
 					name: data.name,
 					description: data.description,
 					quantity: data.quantity,
-					uniqueId: data.uniqueId ?? 0
+					uniqueId: data.uniqueId ?? 0,
+					imageUrl: data.imageUrl || defaultImageUrl
 				});
 			});
 
@@ -126,46 +169,74 @@
 		return quantity <= lowStockThreshold;
 	}
 
-	async function addItem() {
-		try {
-			if (!newItem.name || !newItem.quantity) {
-				alert('Please fill in all required fields');
+async function addItem() {
+	try {
+		if (!newItem.name || !newItem.quantity) {
+			alert('Please fill in all required fields');
+			return;
+		}
+
+		const user = auth.currentUser;
+		if (!user) {
+			alert('You must be logged in to add items!');
+			return;
+		}
+
+		const counterDoc = doc(db, 'counters', 'inventoryCounter');
+		const counterSnapshot = await getDoc(counterDoc);
+		let newId = 1;
+
+		if (counterSnapshot.exists()) {
+			const counterData = counterSnapshot.data();
+			if (counterData.lastId) newId = counterData.lastId + 1;
+		}
+
+		let imageUrl = defaultImageUrl;
+
+		// 🖼️ If the user selected an image, upload to ImgBB
+		if (newItem.imageFile) {
+			if (!IMGBB_API_KEY) {
+				alert('ImgBB API key missing. Please add VITE_IMGBB_API_KEY to your .env file');
 				return;
 			}
 
-			const user = auth.currentUser;
-			if (!user) {
-				alert('You must be logged in to add items!');
-				return;
-			}
+			const base64Image = await fileToBase64(newItem.imageFile);
+			const formData = new FormData();
+			formData.append('image', base64Image.split(',')[1]);
 
-			const counterDoc = doc(db, 'counters', 'inventoryCounter');
-			const counterSnapshot = await getDoc(counterDoc);
-			let newId = 1;
-
-			if (counterSnapshot.exists()) {
-				const counterData = counterSnapshot.data();
-				if (counterData.lastId) newId = counterData.lastId + 1;
-			}
-
-			await addDoc(collection(db, 'inventory'), {
-				uniqueId: newId,
-				name: newItem.name,
-				description: newItem.description,
-				quantity: Number(newItem.quantity),
-				userId: user.uid,
-				createdAt: new Date()
+			const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+				method: 'POST',
+				body: formData
 			});
 
-			await setDoc(counterDoc, { lastId: newId });
+			const data = await response.json();
 
-			closeModal();
-			await loadItems();
-			triggerSnackbar('Successfully added');
-		} catch (error) {
-			console.error('Error adding item:', error);
+			if (data.success) {
+				imageUrl = data.data.url;
+			} else {
+				console.warn('⚠️ ImgBB upload failed, using default image.');
+			}
 		}
+
+		await addDoc(collection(db, 'inventory'), {
+			uniqueId: newId,
+			name: newItem.name,
+			description: newItem.description,
+			quantity: Number(newItem.quantity),
+			userId: user.uid,
+			imageUrl,
+			createdAt: new Date()
+		});
+
+		await setDoc(counterDoc, { lastId: newId });
+
+		closeModal();
+		await loadItems();
+		triggerSnackbar('Successfully added');
+	} catch (error) {
+		console.error('Error adding item:', error);
 	}
+}
 
 	function startEdit(item: Item) {
 		isEditing = true;
@@ -173,26 +244,56 @@
 		newItem = {
 			name: item.name,
 			description: item.description,
-			quantity: item.quantity.toString()
+			quantity: item.quantity.toString(),
+			imageFile: null
 		};
 		showModal = true;
 	}
 
-	async function saveEdit() {
-		try {
-			if (!editingId) return;
-			await updateDoc(doc(db, 'inventory', editingId), {
-				name: newItem.name,
-				description: newItem.description,
-				quantity: Number(newItem.quantity)
-			});
-			closeModal();
-			await loadItems();
-			triggerSnackbar('Successfully updated');
-		} catch (error) {
-			console.error('Error saving edit:', error);
-		}
-	}
+async function saveEdit() {
+    if (!editingId) return;
+
+    // Find the original item
+    const originalItem = items.find(item => item.id === editingId);
+    if (!originalItem) return;
+
+    let imageUrl = originalItem.imageUrl; // keep existing image if not changed
+
+    // Upload new image if provided
+    if (newItem.imageFile) {
+        if (!IMGBB_API_KEY) {
+            alert('ImgBB API key missing.');
+            return;
+        }
+
+        const base64Image = await fileToBase64(newItem.imageFile);
+        const formData = new FormData();
+        formData.append('image', base64Image.split(',')[1]);
+
+        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.success) {
+            imageUrl = data.data.url;
+        }
+    }
+
+    // Update Firestore
+    const itemRef = doc(db, 'inventory', editingId); // make sure collection is correct
+    await updateDoc(itemRef, {
+        name: newItem.name,
+        description: newItem.description,
+        quantity: Number(newItem.quantity),
+        imageUrl
+    });
+
+    closeModal();
+    await loadItems();
+    triggerSnackbar('Item updated successfully');
+}
+
 
 	async function deleteItem(id: string) {
 		try {
@@ -209,8 +310,146 @@
 		showModal = false;
 		isEditing = false;
 		editingId = null;
-		newItem = { name: '', description: '', quantity: '' };
+		newItem = { name: '', description: '', quantity: '' , imageFile: null};
+		previewUrl = null; // <-- reset preview
 	}
+
+	// Image Upload Functions
+	function openImageModal(item: Item) {
+		selectedItemForImage = item;
+		showImageModal = true;
+	}
+
+	function closeImageModal() {
+		showImageModal = false;
+		selectedItemForImage = null;
+	}
+
+	// ✨ NEW: Upload to ImgBB
+	async function handleImageUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		if (!input.files || input.files.length === 0 || !selectedItemForImage) return;
+
+		const file = input.files[0];
+		
+		// Validate file type
+		if (!file.type.startsWith('image/')) {
+			alert('Please select an image file');
+			return;
+		}
+
+		// Validate file size (max 32MB - ImgBB limit)
+		if (file.size > 32 * 1024 * 1024) {
+			alert('Image size should be less than 32MB');
+			return;
+		}
+
+		if (!IMGBB_API_KEY) {
+			alert('ImgBB API key is missing. Please add VITE_IMGBB_API_KEY to your .env file');
+			return;
+		}
+
+		uploadingImage = true;
+
+		try {
+			// Convert image to base64
+			const base64Image = await fileToBase64(file);
+
+			// Upload to ImgBB
+			const formData = new FormData();
+			formData.append('image', base64Image.split(',')[1]); // Remove data:image/xxx;base64, prefix
+
+			const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+				method: 'POST',
+				body: formData
+			});
+
+			const data = await response.json();
+
+			if (data.success) {
+				const imageUrl = data.data.url;
+
+				// Update Firestore with the new image URL
+				await updateDoc(doc(db, 'inventory', selectedItemForImage.id), {
+					imageUrl: imageUrl
+				});
+
+				await loadItems();
+				closeImageModal();
+				triggerSnackbar('Image uploaded successfully');
+			} else {
+				throw new Error(data.error?.message || 'Upload failed');
+			}
+		} catch (error) {
+			console.error('Error uploading image:', error);
+			alert('Failed to upload image. Please try again.');
+		} finally {
+			uploadingImage = false;
+		}
+	}
+
+	// Helper function to convert file to base64
+	function fileToBase64(file: File): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.readAsDataURL(file);
+			reader.onload = () => resolve(reader.result as string);
+			reader.onerror = error => reject(error);
+		});
+	}
+
+
+	async function addItemWithOptionalImage(
+	name: string,
+	description: string,
+	quantity: number,
+	userId: string,
+	uniqueId: number,
+	imageFile?: File
+) {
+	try {
+		// Default image URL (placeholder)
+		let imageUrl = 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=400&h=400&fit=crop';
+
+		// Upload image only if the user selected one
+		if (imageFile) {
+			const formData = new FormData();
+			formData.append('image', imageFile);
+
+			const response = await fetch(
+				`https://api.imgbb.com/1/upload?key=${import.meta.env.VITE_IMGBB_API_KEY}`,
+				{
+					method: 'POST',
+					body: formData
+				}
+			);
+
+			const data = await response.json();
+
+			if (data && data.data && data.data.url) {
+				imageUrl = data.data.url;
+			} else {
+				console.warn('⚠️ ImgBB upload failed, using default image.');
+			}
+		}
+
+		// Store the item in Firestore (with the image URL)
+		await addDoc(collection(db, 'inventory'), {
+			name,
+			description,
+			quantity,
+			userId,
+			uniqueId,
+			createdAt: new Date(),
+			imageUrl
+		});
+
+		console.log('✅ Item added successfully with image URL:', imageUrl);
+	} catch (error) {
+		console.error('❌ Error adding item with optional image:', error);
+	}
+}
+
 </script>
 
 <div class="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-blue-50 overflow-hidden">
@@ -268,6 +507,7 @@
 				<thead
 					class="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
 					<tr>
+						<th class="px-6 py-5 text-left text-sm font-bold text-gray-700 uppercase tracking-wider"></th>
 						<th class="px-6 py-5 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Item
 							Name</th>
 						<th
@@ -288,11 +528,27 @@
 					{#each filteredItems as item (item.id)}
 						<tr class="hover:bg-gray-50 transition-colors duration-200">
 							<td class="px-6 py-5">
-								<div class="flex items-center">
-									<div
-										class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center mr-4">
-										<span class="text-white font-semibold text-sm">{item.name.charAt(0).toUpperCase()}</span>
+								<button 
+									on:click={() => openImageModal(item)}
+									class="relative group cursor-pointer">
+									<img 
+										src={item.imageUrl || defaultImageUrl} 
+										alt={item.name}
+										class="w-16 h-16 object-cover rounded-xl shadow-md group-hover:opacity-75 transition-opacity duration-200" />
+									<div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-black/30 rounded-xl">
+										<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+										</svg>
 									</div>
+								</button>
+							</td>
+							<td class="px-6 py-5">
+								<div class="flex items-center">
+									<!-- <div -->
+										<!-- class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center mr-4"> -->
+										<!-- <span class="text-white font-semibold text-sm">{item.name.charAt(0).toUpperCase()}</span> -->
+									<!-- </div> -->
 									<div>
 										<p class="text-lg font-semibold text-gray-800">{item.name}</p>
 										<p class="text-sm text-gray-500">ID: {item.uniqueId}</p>
@@ -364,7 +620,76 @@
 	</div>
 {/if}
 
-<!-- ✅ Modal -->
+<!-- ✅ Image Upload Modal -->
+{#if showImageModal && selectedItemForImage}
+	<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
+		on:click={closeImageModal}>
+		<div class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300"
+			on:click|stopPropagation>
+			<!-- Modal Header -->
+			<div class="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<div class="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+							<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+							</svg>
+						</div>
+						<h2 class="text-2xl font-bold text-white">Update Item Image</h2>
+					</div>
+					<button 
+						on:click={closeImageModal}
+						class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors duration-200">
+						<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
+
+			<!-- Modal Body -->
+			<div class="p-8">
+				<div class="text-center mb-6">
+					<img 
+						src={selectedItemForImage.imageUrl || defaultImageUrl} 
+						alt={selectedItemForImage.name}
+						class="w-48 h-48 object-cover rounded-2xl mx-auto shadow-lg mb-4" />
+					<h3 class="text-xl font-bold text-gray-800">{selectedItemForImage.name}</h3>
+					<p class="text-sm text-gray-500">Click below to upload a new image</p>
+				</div>
+
+				<label class="block">
+					<input
+						type="file"
+						accept="image/*"
+						on:change={handleImageUpload}
+						disabled={uploadingImage}
+						class="hidden" />
+					<div class="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-2xl font-semibold transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 active:scale-95 cursor-pointer text-center flex items-center justify-center gap-2 {uploadingImage ? 'opacity-60 cursor-not-allowed' : ''}">
+						{#if uploadingImage}
+							<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							Uploading to ImgBB...
+						{:else}
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+							</svg>
+							Choose Image
+						{/if}
+					</div>
+				</label>
+
+				<p class="text-xs text-gray-500 text-center mt-4">
+					Supported formats: JPG, PNG, GIF (Max 32MB)
+				</p>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- ✅ Add/Edit Item Modal -->
 {#if showModal}
 	<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
 		on:click={closeModal}>
@@ -456,6 +781,71 @@
 						</div>
 					</div>
 				</div>
+
+<!-- Image Upload (Optional) -->
+<div>
+	<label class="block text-sm font-semibold text-gray-700 mb-2">
+		Item Image <span class="text-gray-500 text-sm font-normal">(optional)</span>
+	</label>
+
+	<div class="relative flex items-center gap-4">
+		<!-- Image Preview -->
+		{#if previewUrl}
+			<img
+				src={previewUrl}
+				alt="Preview"
+				class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200"
+			/>
+		{:else}
+			<img
+				src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=100&h=100&fit=crop"
+				alt="Default"
+				class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200"
+			/>
+		{/if}
+
+		<!-- Upload Button -->
+		<button
+			type="button"
+			class="cursor-pointer px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-semibold text-sm transition-all duration-300 hover:shadow-md active:scale-95 flex items-center"
+			on:click={() => fileInput?.click()}
+		>
+			<svg
+				class="inline-block w-5 h-5 mr-2 text-gray-600"
+				fill="none"
+				stroke="currentColor"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M12 4v16m8-8H4"
+				/>
+			</svg>
+			Select Image
+		</button>
+
+		<!-- Hidden File Input -->
+<input
+  type="file"
+  bind:this={fileInput}
+  accept="image/*"
+  class="hidden"
+  on:change={async (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      const file = input.files?.[0];
+      if (file) {
+          const compressedFile = await compressImage(file);
+          newItem.imageFile = compressedFile;
+          previewUrl = URL.createObjectURL(compressedFile);
+      }
+  }}
+/>
+
+	</div>
+</div>
+
 
 				<!-- Action Buttons -->
 				<div class="flex items-center justify-end gap-3 mt-8 pt-6 border-t border-gray-200">

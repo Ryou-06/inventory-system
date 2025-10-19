@@ -13,7 +13,7 @@
 		quantity: number;
 	}
 
-	let items: Item[] = [];
+	let items: Item[] = [];	
 	let lowStockThreshold = 20;
 	let loading = true;
 	let userEmail: string | null = null;
@@ -99,8 +99,8 @@
 						</svg>
 					</div>
 					<div>
-						<h1 class="text-4xl font-bold text-gray-800 mb-2">Inventory Management</h1>
-						<p class="text-gray-600">Overview of your inventory system</p>
+						<h1 class="text-4xl font-bold text-gray-800 mb-2">My SQL Dashboard</h1>
+						<p class="text-gray-600">Smart Quantity Logistics - Overview</p>
 					</div>
 				</div>
 			</div>

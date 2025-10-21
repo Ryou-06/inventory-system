@@ -93,6 +93,15 @@
 			imageFile: null
 		};
 
+let formErrors: {
+	name?: string;
+	quantity?: string;
+	category?: string;
+	description?: string;
+	productionDate?: string;
+	expirationDate?: string;
+} = {};
+
 
 
 			let showSnackbar = false;
@@ -153,6 +162,36 @@
 				);
 			});
 		}
+
+function validateForm(): boolean {
+	formErrors = {};
+
+	if (!newItem.name.trim()) {
+		formErrors.name = 'Item name is required';
+	}
+
+	if (!newItem.quantity || Number(newItem.quantity) <= 0) {
+		formErrors.quantity = 'Quantity must be greater than 0';
+	}
+
+	if (!newItem.category.trim()) {
+		formErrors.category = 'Category is required';
+	}
+
+	if (!newItem.description.trim()) {
+		formErrors.description = 'Description is required';
+	}
+
+	if (!newItem.productionDate.trim()) {
+		formErrors.productionDate = 'Production date is required';
+	}
+
+	if (!newItem.expirationDate.trim()) {
+		formErrors.expirationDate = 'Expiration date is required';
+	}
+
+	return Object.keys(formErrors).length === 0;
+}
 
 		function isNearExpiration(expirationDate?: string): boolean {
 			if (!expirationDate) return false;
@@ -237,54 +276,53 @@ $: [searchQuery, categoryFilter], filterItems();
 				return quantity <= lowStockThreshold;
 			}
 
-		async function addItem() {
-			try {
-				if (!newItem.name || !newItem.quantity) {
-					alert('Please fill in all required fields');
-					return;
-				}
+async function addItem() {
+	try {
+		if (!validateForm()) {
+			return;
+		}
 
-				const user = auth.currentUser;
-				if (!user) {
-					alert('You must be logged in to add items!');
-					return;
-				}
+		const user = auth.currentUser;
+		if (!user) {
+			alert('You must be logged in to add items!');
+			return;
+		}
 
-				const counterDoc = doc(db, 'counters', 'inventoryCounter');
-				const counterSnapshot = await getDoc(counterDoc);
-				let newId = 1;
+		const counterDoc = doc(db, 'counters', 'inventoryCounter');
+		const counterSnapshot = await getDoc(counterDoc);
+		let newId = 1;
 
-				if (counterSnapshot.exists()) {
-					const counterData = counterSnapshot.data();
-					if (counterData.lastId) newId = counterData.lastId + 1;
-				}
+		if (counterSnapshot.exists()) {
+			const counterData = counterSnapshot.data();
+			if (counterData.lastId) newId = counterData.lastId + 1;
+		}
 
-				let imageUrl = defaultImageUrl;
+		let imageUrl = defaultImageUrl;
 
-				// 🖼️ If the user selected an image, upload to ImgBB
-				if (newItem.imageFile) {
-					if (!IMGBB_API_KEY) {
-						alert('ImgBB API key missing. Please add VITE_IMGBB_API_KEY to your .env file');
-						return;
-					}
+		// 🖼️ If the user selected an image, upload to ImgBB
+		if (newItem.imageFile) {
+			if (!IMGBB_API_KEY) {
+				alert('ImgBB API key missing. Please add VITE_IMGBB_API_KEY to your .env file');
+				return;
+			}
 
-					const base64Image = await fileToBase64(newItem.imageFile);
-					const formData = new FormData();
-					formData.append('image', base64Image.split(',')[1]);
+			const base64Image = await fileToBase64(newItem.imageFile);
+			const formData = new FormData();
+			formData.append('image', base64Image.split(',')[1]);
 
-					const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-						method: 'POST',
-						body: formData
-					});
+			const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+				method: 'POST',
+				body: formData
+			});
 
-					const data = await response.json();
+			const data = await response.json();
 
-					if (data.success) {
-						imageUrl = data.data.url;
-					} else {
-						console.warn('⚠️ ImgBB upload failed, using default image.');
-					}
-				}
+			if (data.success) {
+				imageUrl = data.data.url;
+			} else {
+				console.warn('⚠️ ImgBB upload failed, using default image.');
+			}
+		}
 
 		await addDoc(collection(db, 'inventory'), {
 			uniqueId: newId,
@@ -299,15 +337,15 @@ $: [searchQuery, categoryFilter], filterItems();
 			createdAt: new Date()
 		});
 
-				await setDoc(counterDoc, { lastId: newId });
+		await setDoc(counterDoc, { lastId: newId });
 
-				closeModal();
-				await loadItems();
-				triggerSnackbar('Successfully added');
-			} catch (error) {
-				console.error('Error adding item:', error);
-			}
-		}
+		closeModal();
+		await loadItems();
+		triggerSnackbar('Successfully added');
+	} catch (error) {
+		console.error('Error adding item:', error);
+	}
+}
 
 		async function handleDeductSubmit() {
 		const amountToDeduct = Number(deductAmount);
@@ -429,52 +467,56 @@ $: [searchQuery, categoryFilter], filterItems();
 
 
 
-		async function saveEdit() {
-			if (!editingId) return;
+async function saveEdit() {
+	if (!editingId) return;
 
-			// Find the original item
-			const originalItem = items.find(item => item.id === editingId);
-			if (!originalItem) return;
+	if (!validateForm()) {
+		return;
+	}
 
-			let imageUrl = originalItem.imageUrl; // keep existing image if not changed
+	// Find the original item
+	const originalItem = items.find(item => item.id === editingId);
+	if (!originalItem) return;
 
-			// Upload new image if provided
-			if (newItem.imageFile) {
-				if (!IMGBB_API_KEY) {
-					alert('ImgBB API key missing.');
-					return;
-				}
+	let imageUrl = originalItem.imageUrl; // keep existing image if not changed
 
-				const base64Image = await fileToBase64(newItem.imageFile);
-				const formData = new FormData();
-				formData.append('image', base64Image.split(',')[1]);
-
-				const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-					method: 'POST',
-					body: formData
-				});
-				const data = await response.json();
-				if (data.success) {
-					imageUrl = data.data.url;
-				}
-			}
-
-			// Update Firestore
-		const itemRef = doc(db, 'inventory', editingId);
-		await updateDoc(itemRef, {
-			name: newItem.name,
-			description: newItem.description,
-			quantity: Number(newItem.quantity),
-			category: newItem.category || '',
-			productionDate: newItem.productionDate || null,
-			expirationDate: newItem.expirationDate || null,
-			imageUrl
-		});
-
-			closeModal();
-			await loadItems();
-			triggerSnackbar('Item updated successfully');
+	// Upload new image if provided
+	if (newItem.imageFile) {
+		if (!IMGBB_API_KEY) {
+			alert('ImgBB API key missing.');
+			return;
 		}
+
+		const base64Image = await fileToBase64(newItem.imageFile);
+		const formData = new FormData();
+		formData.append('image', base64Image.split(',')[1]);
+
+		const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+			method: 'POST',
+			body: formData
+		});
+		const data = await response.json();
+		if (data.success) {
+			imageUrl = data.data.url;
+		}
+	}
+
+	// Update Firestore
+	const itemRef = doc(db, 'inventory', editingId);
+	await updateDoc(itemRef, {
+		name: newItem.name,
+		description: newItem.description,
+		quantity: Number(newItem.quantity),
+		category: newItem.category || '',
+		productionDate: newItem.productionDate || null,
+		expirationDate: newItem.expirationDate || null,
+		imageUrl
+	});
+
+	closeModal();
+	await loadItems();
+	triggerSnackbar('Item updated successfully');
+}
 
 
 			async function deleteItem(id: string) {
@@ -934,238 +976,248 @@ $: [searchQuery, categoryFilter], filterItems();
 		{/if}
 
 		<!-- ✅ Add/Edit Item Modal -->
-		{#if showModal}
-			<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
-				on:click={closeModal}>
-				<div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300"
-					on:click|stopPropagation>
-					<!-- Modal Header -->
-					<div class="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6">
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-3">
-								<div class="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
-									<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										{#if isEditing}
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-										{:else}
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-										{/if}
-									</svg>
-								</div>
-								<h2 class="text-2xl font-bold text-white">{isEditing ? 'Edit Item' : 'Add New Item'}</h2>
-							</div>
-							<button 
-								on:click={closeModal}
-								class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors duration-200">
-								<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-								</svg>
-							</button>
-						</div>
-					</div>
-					
-
-					<!-- Modal Body -->
-				<div class="p-8">
-					<!-- Two Column Grid Layout -->
-					<div class="grid grid-cols-2 gap-6">
-						<!-- Left Column -->
-						<div class="space-y-5">
-							<!-- Item Name Input -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Item Name <span class="text-red-500">*</span>
-								</label>
-								<div class="relative">
-									<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
-										<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
-										</svg>
-									</div>
-									<input 
-										type="text" 
-										placeholder="Enter item name" 
-										bind:value={newItem.name}
-										class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400" />
-								</div>
-							</div>
-
-							<!-- Quantity Input -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Quantity <span class="text-red-500">*</span>
-								</label>
-								<div class="relative">
-									<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
-										<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"></path>
-										</svg>
-									</div>
-									<input 
-										type="number" 
-										placeholder="Enter quantity" 
-										bind:value={newItem.quantity}
-										min="0"
-										class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400" />
-								</div>
-							</div>
-
-							<!-- Category Dropdown -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Category <span class="text-red-500">*</span>
-								</label>
-								<div class="relative">
-									<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
-										<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-										</svg>
-									</div>
-									<select
-										bind:value={newItem.category}
-										class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800"
-										required>
-										<option value="" disabled>Select Category</option>
-										<option value="Frozen Product">Frozen Product</option>
-										<option value="Warehouse Product">Warehouse Product</option>
-										<option value="Fresh Produce">Fresh Produce</option>
-										<option value="Grocery Item">Grocery Item</option>
-										<option value="Restaurant Supply">Restaurant Supply</option>
-										<option value="Personal Care">Personal Care</option>
-									</select>
-								</div>
-							</div>
-
-							<!-- Production Date -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Production Date
-								</label>
-								<input
-									type="date"
-									bind:value={newItem.productionDate}
-									class="w-full px-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800" />
-							</div>
-						</div>
-
-						<!-- Right Column -->
-						<div class="space-y-5">
-							<!-- Description Input -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Description
-								</label>
-								<div class="relative">
-									<div class="absolute left-4 top-4 text-gray-400">
-										<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
-										</svg>
-									</div>
-									<textarea 
-										placeholder="Enter description (optional)" 
-										bind:value={newItem.description}
-										rows="3"
-										class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400 resize-none"></textarea>
-								</div>
-							</div>
-
-							<!-- Expiration Date -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Expiration Date
-								</label>
-								<input
-									type="date"
-									bind:value={newItem.expirationDate}
-									class="w-full px-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800" />
-							</div>
-
-							<!-- Image Upload (Optional) -->
-							<div>
-								<label class="block text-sm font-semibold text-gray-700 mb-2">
-									Item Image <span class="text-gray-500 text-sm font-normal">(optional)</span>
-								</label>
-
-								<div class="relative flex items-center gap-4">
-									<!-- Image Preview -->
-									{#if previewUrl}
-										<img
-											src={previewUrl}
-											alt="Preview"
-											class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200" />
-									{:else}
-										<img
-											src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=100&h=100&fit=crop"
-											alt="Default"
-											class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200" />
-									{/if}
-
-									<!-- Upload Button -->
-									<button
-										type="button"
-										class="cursor-pointer px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-semibold text-sm transition-all duration-300 hover:shadow-md active:scale-95 flex items-center"
-										on:click={() => fileInput?.click()}>
-										<svg
-											class="inline-block w-5 h-5 mr-2 text-gray-600"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24">
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M12 4v16m8-8H4" />
-										</svg>
-										Select Image
-									</button>
-
-									<!-- Hidden File Input -->
-									<input
-										type="file"
-										bind:this={fileInput}
-										accept="image/*"
-										class="hidden"
-										on:change={async (event: Event) => {
-											const input = event.target as HTMLInputElement;
-											const file = input.files?.[0];
-											if (file) {
-												const compressedFile = await compressImage(file);
-												newItem.imageFile = compressedFile;
-												previewUrl = URL.createObjectURL(compressedFile);
-											}
-										}} />
-								</div>
-							</div>
-						</div>
-					</div>
-
-						<!-- Action Buttons -->
-						<div class="flex items-center justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
-							<button 
-								class="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-all duration-300 hover:shadow-md active:scale-95"
-								on:click={closeModal}>
-								Cancel
-							</button>
-							<button 
-								class="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
-								on:click={isEditing ? saveEdit : addItem}>
+{#if showModal}
+	<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+		<div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300"
+			on:click|stopPropagation>
+			<!-- Modal Header -->
+			<div class="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-3">
+						<div class="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+							<svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								{#if isEditing}
-									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-									</svg>
-									Save Changes
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
 								{:else}
-									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-									</svg>
-									Add Item
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
 								{/if}
-							</button>	
+							</svg>
+						</div>
+						<h2 class="text-2xl font-bold text-white">{isEditing ? 'Edit Item' : 'Add New Item'}</h2>
+					</div>
+					<button 
+						on:click={closeModal}
+						class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors duration-200">
+						<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
+
+			<!-- Modal Body -->
+			<div class="p-8">
+				<!-- Two Column Grid Layout -->
+				<div class="grid grid-cols-2 gap-6">
+					<!-- Left Column -->
+					<div class="space-y-5">
+						<!-- Item Name Input -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Item Name <span class="text-red-500">*</span>
+							</label>
+							<div class="relative">
+								<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+									</svg>
+								</div>
+								<input 
+									type="text" 
+									placeholder="Enter item name" 
+									bind:value={newItem.name}
+									class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 {formErrors.name ? 'border-red-500' : 'border-gray-200'} rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400" />
+							</div>
+							{#if formErrors.name}
+								<p class="text-red-500 text-sm mt-1">{formErrors.name}</p>
+							{/if}
+						</div>
+
+						<!-- Quantity Input -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Quantity <span class="text-red-500">*</span>
+							</label>
+							<div class="relative">
+								<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"></path>
+									</svg>
+								</div>
+								<input 
+									type="number" 
+									placeholder="Enter quantity" 
+									bind:value={newItem.quantity}
+									min="0"
+									class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 {formErrors.quantity ? 'border-red-500' : 'border-gray-200'} rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400" />
+							</div>
+							{#if formErrors.quantity}
+								<p class="text-red-500 text-sm mt-1">{formErrors.quantity}</p>
+							{/if}
+						</div>
+
+						<!-- Category Dropdown -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Category <span class="text-red-500">*</span>
+							</label>
+							<div class="relative">
+								<div class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+									</svg>
+								</div>
+								<select
+									bind:value={newItem.category}
+									class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 {formErrors.category ? 'border-red-500' : 'border-gray-200'} rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800"
+									required>
+									<option value="" disabled>Select Category</option>
+									<option value="Frozen Product">Frozen Product</option>
+									<option value="Warehouse Product">Warehouse Product</option>
+									<option value="Fresh Produce">Fresh Produce</option>
+									<option value="Grocery Item">Grocery Item</option>
+									<option value="Restaurant Supply">Restaurant Supply</option>
+									<option value="Personal Care">Personal Care</option>
+								</select>
+							</div>
+							{#if formErrors.category}
+								<p class="text-red-500 text-sm mt-1">{formErrors.category}</p>
+							{/if}
+						</div>
+
+						<!-- Production Date -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Production Date
+							</label>
+							<input
+								type="date"
+								bind:value={newItem.productionDate}
+								class="w-full px-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800" />
+						</div>
+					</div>
+
+					<!-- Right Column -->
+					<div class="space-y-5">
+						<!-- Description Input -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Description
+							</label>
+							<div class="relative">
+								<div class="absolute left-4 top-4 text-gray-400">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
+									</svg>
+								</div>
+								<textarea 
+									placeholder="Enter description (optional)" 
+									bind:value={newItem.description}
+									rows="3"
+									class="w-full pl-12 pr-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800 placeholder-gray-400 resize-none"></textarea>
+							</div>
+						</div>
+
+						<!-- Expiration Date -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Expiration Date <span class="text-red-500">*</span>
+							</label>
+							<input
+								type="date"
+								bind:value={newItem.expirationDate}
+								class="w-full px-4 py-3.5 bg-gray-50 border-2 {formErrors.expirationDate ? 'border-red-500' : 'border-gray-200'} rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-all duration-300 focus:shadow-lg text-gray-800" />
+							{#if formErrors.expirationDate}
+								<p class="text-red-500 text-sm mt-1">{formErrors.expirationDate}</p>
+							{/if}
+						</div>
+
+						<!-- Image Upload (Optional) -->
+						<div>
+							<label class="block text-sm font-semibold text-gray-700 mb-2">
+								Item Image <span class="text-gray-500 text-sm font-normal">(optional)</span>
+							</label>
+
+							<div class="relative flex items-center gap-4">
+								<!-- Image Preview -->
+								{#if previewUrl}
+									<img
+										src={previewUrl}
+										alt="Preview"
+										class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200" />
+								{:else}
+									<img
+										src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=100&h=100&fit=crop"
+										alt="Default"
+										class="w-20 h-20 object-cover rounded-xl border-2 border-gray-200" />
+								{/if}
+
+								<!-- Upload Button -->
+								<button
+									type="button"
+									class="cursor-pointer px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-semibold text-sm transition-all duration-300 hover:shadow-md active:scale-95 flex items-center"
+									on:click={() => fileInput?.click()}>
+									<svg
+										class="inline-block w-5 h-5 mr-2 text-gray-600"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24">
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M12 4v16m8-8H4" />
+									</svg>
+									Select Image
+								</button>
+
+								<!-- Hidden File Input -->
+								<input
+									type="file"
+									bind:this={fileInput}
+									accept="image/*"
+									class="hidden"
+									on:change={async (event: Event) => {
+										const input = event.target as HTMLInputElement;
+										const file = input.files?.[0];
+										if (file) {
+											const compressedFile = await compressImage(file);
+											newItem.imageFile = compressedFile;
+											previewUrl = URL.createObjectURL(compressedFile);
+										}
+									}} />
+							</div>
 						</div>
 					</div>
 				</div>
+
+					<!-- Action Buttons -->
+					<div class="flex items-center justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
+						<button 
+							class="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold transition-all duration-300 hover:shadow-md active:scale-95"
+							on:click={closeModal}>
+							Cancel
+						</button>
+						<button 
+							class="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 active:scale-95 flex items-center gap-2"
+							on:click={isEditing ? saveEdit : addItem}>
+							{#if isEditing}
+								<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+								</svg>
+								Save Changes
+							{:else}
+								<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+								</svg>
+								Add Item
+							{/if}
+						</button>	
+					</div>
+				</div>
 			</div>
-		{/if}
+		</div>
+{/if}
 
 
 	{#if showDeductModal}

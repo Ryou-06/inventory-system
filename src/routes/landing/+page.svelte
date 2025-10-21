@@ -135,7 +135,7 @@
 			const dateB = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime();
 			return dateB - dateA;
 		})
-		.slice(0, 5);
+		.slice(0, 3);
 
 	$: expiringItemsList = items
 		.filter(item => isExpiringSoon(item.expirationDate))
@@ -160,7 +160,7 @@
 	</div>
 {:else}
 	<div class="h-screen overflow-y-auto bg-gradient-to-br from-slate-50 to-blue-50">
-		<div class="max-w-[1800px] mx-auto p-4 md:p-6 lg:p-8 pb-8">
+		<div class="max-w-[1800px] mx-auto p-4 md:p-6 lg:p-8" style="padding-bottom: 100px;">
 			
 			<!-- Dashboard Header -->
 			<div class="mb-6 lg:mb-8">
